@@ -74,11 +74,16 @@ func run() int {
 		return 1
 	}
 
+	limitNote := ""
+	if *regionLimit > 0 {
+		limitNote = fmt.Sprintf("，每 region 前 %d 名（含同分并列）", *regionLimit)
+	}
 	fmt.Fprintf(os.Stdout,
-		"完成: %d 条记录, %d 个临时段（复用 %d，新建 %d）, %d 次归并, 段峰值约 %d 字节%s\n",
+		"完成: %d 条记录, %d 个临时段（复用 %d，新建 %d）, %d 次归并, 段峰值约 %d 字节%s%s\n",
 		stats.TotalRecords,
 		stats.ReusedSegments+stats.BuiltSegments, stats.ReusedSegments, stats.BuiltSegments,
 		stats.MergeRuns, stats.SegmentMaxBytes,
+		limitNote,
 		map[bool]string{true: "（复用已发布输出）", false: ""}[stats.ReusedOutput],
 	)
 	return 0

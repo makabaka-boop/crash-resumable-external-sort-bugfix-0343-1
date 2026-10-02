@@ -43,7 +43,7 @@ type Hooks struct {
 
 // Stats 汇报本次执行的结果。
 type Stats struct {
-	TotalRecords    int64
+	TotalRecords    int64 // 实际写入输出的记录数（应用 region 上限后）
 	Segments        int
 	SegmentMaxBytes int64 // 刷段前驻留记录负载估算的峰值
 	MergeRuns       int
@@ -88,6 +88,21 @@ func Run(ctx context.Context, opts Options, hooks Hooks) (*Stats, error) {
 		m = nil
 	}
 
+	// 分段与归并段是与 region 上限无关的全量有序数据，上限变化时仍可复用；
+	// 但已发布输出是按“当时的上限”截断的，上限不一致必须作废，绝不能复用。
+	if m != nil && m.Output != nil && m.RegionLimit != e.opts.RegionLimit {
+		if len(m.Segments) == 0 && len(m.Runs) == 0 {
+			// 段已随发布被清理：没有任何可复用成果，整体重来。
+			if err := resetWorkDir(e.opts.WorkDir); err != nil {
+				return nil, err
+			}
+			m = nil
+		} else {
+			m.Output = nil
+			_ = m.save(e.opts.WorkDir)
+		}
+	}
+
 	if m != nil && m.Output != nil {
 		// 已发布输出且校验通过：直接复用，什么都不重做。
 		if e.verifyPublished(m.Output) {
@@ -105,6 +120,17 @@ func Run(ctx context.Context, opts Options, hooks Hooks) (*Stats, error) {
 		} else {
 			m.Output = nil
 			_ = m.save(e.opts.WorkDir)
+		}
+	}
+
+	if m != nil {
+		// 段/归并段与 region 上限无关，可跨上限复用；但清单字段必须反映
+		// 本次任务的发布口径，保证再次运行的复用判断与本次参数吻合。
+		if m.RegionLimit != e.opts.RegionLimit {
+			m.RegionLimit = e.opts.RegionLimit
+			if err := m.save(e.opts.WorkDir); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -148,11 +174,13 @@ func Run(ctx context.Context, opts Options, hooks Hooks) (*Stats, error) {
 	if err != nil {
 		return nil, err
 	}
-	e.stats.TotalRecords = totalRecords
 
-	if err := e.publish(sources, totalRecords); err != nil {
+	// TotalRecords 统计实际输出（截断后）的条数；发布返回最终写入数量。
+	emitted, err := e.publish(sources, totalRecords)
+	if err != nil {
 		return nil, err
 	}
+	e.stats.TotalRecords = emitted
 	return &e.stats, nil
 }
 

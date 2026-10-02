@@ -13,7 +13,11 @@ import (
 
 // ManifestVersion 随排序语义/文件格式变化而递增。
 // 旧版本清单一律不复用。
-const ManifestVersion = 2
+//
+//	v2: 全量外部排序；
+//	v3: 引入按 region 截断的输出语义（v2 清单中的 region_limit 从未生效，
+//	    其已发布输出不可信，必须作废重建）。
+const ManifestVersion = 3
 
 const manifestName = "manifest.json"
 
@@ -53,16 +57,19 @@ type OutputInfo struct {
 
 // Manifest 是断点续跑的全部依据。
 type Manifest struct {
-	Version        int           `json:"version"`
-	CreatedAt      int64         `json:"created_at_unixnano"`
-	UpdatedAt      int64         `json:"updated_at_unixnano"`
-	Input          InputInfo     `json:"input"`
-	FlushThreshold int           `json:"flush_threshold"`
-	MaxMergeWay    int           `json:"max_merge_way"`
-	RegionLimit    int           `json:"region_limit,omitempty"`
-	Segments       []SegmentInfo `json:"segments"`
-	Runs           []RunInfo     `json:"runs"`
-	Output         *OutputInfo   `json:"output,omitempty"`
+	Version        int       `json:"version"`
+	CreatedAt      int64     `json:"created_at_unixnano"`
+	UpdatedAt      int64     `json:"updated_at_unixnano"`
+	Input          InputInfo `json:"input"`
+	FlushThreshold int       `json:"flush_threshold"`
+	MaxMergeWay    int       `json:"max_merge_way"`
+	// RegionLimit 是本次任务每 region 的输出上限（0 表示全量）。
+	// 段与归并段本身始终是全量有序数据，与该值无关；该值只决定已发布
+	// Output 的截断口径，重跑上限不同时已发布输出作废、段仍可复用。
+	RegionLimit int           `json:"region_limit,omitempty"`
+	Segments    []SegmentInfo `json:"segments"`
+	Runs        []RunInfo     `json:"runs"`
+	Output      *OutputInfo   `json:"output,omitempty"`
 }
 
 func manifestPath(workDir string) string { return filepath.Join(workDir, manifestName) }
